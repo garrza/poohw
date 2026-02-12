@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "poohw"
+version = "0.1.0"
+description = "Whoop 4.0 BLE reverse engineering toolkit"
+requires-python = ">=3.11"
+dependencies = [
+    "bleak>=0.21",
+    "click>=8.0",
+]
+
+[project.scripts]
+poohw = "poohw.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
