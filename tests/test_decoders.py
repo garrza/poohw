@@ -54,95 +54,176 @@ class TestHeartRateDecoderCanDecode:
 
 
 class TestHeartRateDecoderDecode:
-    def test_hr_at_offset_1(self):
-        """HR byte at offset 1 (after cmd byte), value 72."""
-        payload = bytes([0x00, 72])  # cmd=0, hr=72
+    """Tests use the confirmed REALTIME_DATA payload format:
+    [0:4] timestamp, [4:6] HR uint16 LE /256, [6] RR count,
+    [7:9] RR1 ms, [9:11] RR2 ms, [11:15] reserved, [15] wearing, [16] sensor.
+    """
+
+    @staticmethod
+    def _make_hr_payload(
+        hr_bpm: float = 72.0,
+        rr_intervals: list[int] | None = None,
+        timestamp: int = 0x08698FA8,
+        wearing: int = 0x01,
+        sensor: int = 0x01,
+    ) -> bytes:
+        """Build a realistic 17-byte REALTIME_DATA payload."""
+        buf = bytearray()
+        buf += struct.pack("<I", timestamp)           # [0:4]
+        buf += struct.pack("<H", int(hr_bpm * 256))   # [4:6]
+        rr = rr_intervals or []
+        buf.append(len(rr))                           # [6]
+        rr1 = rr[0] if len(rr) > 0 else 0
+        rr2 = rr[1] if len(rr) > 1 else 0
+        buf += struct.pack("<H", rr1)                 # [7:9]
+        buf += struct.pack("<H", rr2)                 # [9:11]
+        buf += b"\x00" * 4                            # [11:15] reserved
+        buf.append(wearing)                           # [15]
+        buf.append(sensor)                            # [16]
+        return bytes(buf)
+
+    def test_basic_hr(self):
+        """HR = 72 bpm from real format."""
+        payload = self._make_hr_payload(hr_bpm=72.0)
         wp = make_realtime_packet(data=payload)
         result = HeartRateDecoder.decode(wp)
         assert result is not None
         assert result.hr_bpm == 72
+        assert abs(result.hr_precise - 72.0) < 0.1
 
-    def test_hr_at_offset_2(self):
-        """HR byte at offset 2 (cmd + sub_cmd)."""
-        payload = bytes([0x00, 0x01, 80])  # cmd, sub, hr=80
+    def test_hr_with_fractional(self):
+        """HR = 96.3 bpm — real-world value from capture."""
+        payload = self._make_hr_payload(hr_bpm=96.3)
         wp = make_realtime_packet(data=payload)
         result = HeartRateDecoder.decode(wp)
         assert result is not None
-        assert result.hr_bpm == 80
+        assert result.hr_bpm == 96
+        assert 96.0 <= result.hr_precise <= 96.5
 
-    def test_hr_at_offset_3(self):
-        """HR byte at offset 3."""
-        # Offsets 1 and 2 are out of HR range, offset 3 = 65
-        payload = bytes([0x00, 0x01, 0x02, 65])
+    def test_hr_resting(self):
+        """HR = 62 bpm (resting, from real capture)."""
+        payload = self._make_hr_payload(hr_bpm=62.0)
         wp = make_realtime_packet(data=payload)
         result = HeartRateDecoder.decode(wp)
         assert result is not None
-        assert result.hr_bpm == 65
-
-    def test_hr_uint16_fallback(self):
-        """uint16 LE at offset 1 when no uint8 candidate found."""
-        # byte[1]=0x00 (not in 30-220), byte[2]=0x00, byte[3] not present
-        # uint16 at offset 1 = 150 (0x96, 0x00)
-        payload = bytes([0x00, 0x96, 0x00])
-        wp = make_realtime_packet(data=payload)
-        result = HeartRateDecoder.decode(wp)
-        assert result is not None
-        assert result.hr_bpm == 150
+        assert result.hr_bpm == 62
 
     def test_too_short_returns_none(self):
-        wp = make_realtime_packet(data=b"\x00")
+        """Payload shorter than 7 bytes returns None."""
+        wp = make_realtime_packet(data=b"\x00" * 5)
         result = HeartRateDecoder.decode(wp)
         assert result is None
 
-    def test_no_plausible_hr_returns_none(self):
-        """All bytes are outside 30-220 range."""
-        payload = bytes([0x00, 0x00, 0x00, 0x00, 0x00])
+    def test_zero_hr_returns_none(self):
+        """HR = 0 (sensor not ready) returns None."""
+        payload = self._make_hr_payload(hr_bpm=0.0)
         wp = make_realtime_packet(data=payload)
         result = HeartRateDecoder.decode(wp)
         assert result is None
 
-    def test_with_rr_intervals(self):
-        """HR at offset 1, followed by plausible RR intervals."""
-        rr1, rr2 = 800, 820
-        payload = bytes([0x00, 72]) + struct.pack("<HH", rr1, rr2)
+    def test_with_one_rr_interval(self):
+        """Single RR interval = 961ms (from real capture)."""
+        payload = self._make_hr_payload(hr_bpm=63.0, rr_intervals=[961])
         wp = make_realtime_packet(data=payload)
         result = HeartRateDecoder.decode(wp)
         assert result is not None
-        assert result.hr_bpm == 72
-        assert len(result.rr_intervals_ms) >= 1
+        assert result.hr_bpm == 63
+        assert result.rr_count == 1
+        assert len(result.rr_intervals_ms) == 1
+        assert result.rr_intervals_ms[0] == 961.0
 
-    def test_rmssd_computed_when_enough_rr(self):
-        """RMSSD is computed when >= 2 RR intervals."""
-        rr1, rr2 = 800, 810
-        payload = bytes([0x00, 72]) + struct.pack("<HH", rr1, rr2)
+    def test_with_two_rr_intervals(self):
+        """Two RR intervals (from real capture: 863ms, 921ms)."""
+        payload = self._make_hr_payload(hr_bpm=63.5, rr_intervals=[863, 921])
         wp = make_realtime_packet(data=payload)
         result = HeartRateDecoder.decode(wp)
         assert result is not None
-        if len(result.rr_intervals_ms) >= 2:
-            assert result.hrv_rmssd_ms is not None
+        assert result.rr_count == 2
+        assert len(result.rr_intervals_ms) == 2
+        assert result.rr_intervals_ms == [863.0, 921.0]
+
+    def test_rmssd_computed_with_two_rr(self):
+        """RMSSD computed when 2 RR intervals present."""
+        payload = self._make_hr_payload(hr_bpm=63.5, rr_intervals=[863, 921])
+        wp = make_realtime_packet(data=payload)
+        result = HeartRateDecoder.decode(wp)
+        assert result is not None
+        assert result.hrv_rmssd_ms is not None
+        assert result.hrv_rmssd_ms == 58.0  # |921 - 863| = 58
+
+    def test_no_rr_when_count_zero(self):
+        """Most packets have rr_count=0 (no beat boundary in this second)."""
+        payload = self._make_hr_payload(hr_bpm=96.0, rr_intervals=[])
+        wp = make_realtime_packet(data=payload)
+        result = HeartRateDecoder.decode(wp)
+        assert result is not None
+        assert result.rr_count == 0
+        assert result.rr_intervals_ms == []
+        assert result.hrv_rmssd_ms is None
+
+    def test_wearing_flag(self):
+        """Wearing flag parsed from byte 15."""
+        payload = self._make_hr_payload(hr_bpm=72.0, wearing=0x01)
+        wp = make_realtime_packet(data=payload)
+        result = HeartRateDecoder.decode(wp)
+        assert result is not None
+        assert result.wearing is True
+
+    def test_not_wearing_flag(self):
+        """Wearing=0 means off-wrist."""
+        payload = self._make_hr_payload(hr_bpm=72.0, wearing=0x00)
+        wp = make_realtime_packet(data=payload)
+        result = HeartRateDecoder.decode(wp)
+        assert result is not None
+        assert result.wearing is False
 
     def test_preserves_raw_payload(self):
-        payload = bytes([0x00, 72, 0x01, 0x02])
+        payload = self._make_hr_payload(hr_bpm=72.0)
         wp = make_realtime_packet(data=payload)
         result = HeartRateDecoder.decode(wp)
         assert result is not None
         assert result.raw_payload == payload
 
+    def test_real_packet_bytes(self):
+        """Decode an actual captured packet from the WG50."""
+        # Real payload from full_capture.jsonl (first REALTIME_DATA)
+        # HR should be ~96.3 bpm, no RR intervals
+        real_payload = bytes.fromhex("a88f69084f600000000000000000000101")
+        wp = make_realtime_packet(data=real_payload)
+        result = HeartRateDecoder.decode(wp)
+        assert result is not None
+        assert result.hr_bpm == 96
+        assert 96.0 <= result.hr_precise <= 96.5
+        assert result.rr_count == 0
+        assert result.wearing is True
+
+    def test_real_packet_with_rr(self):
+        """Decode a real packet with RR interval data (packet 41 from capture)."""
+        # payload: a88f6900 3f40 01 c103 0000 00000000 0101
+        # HR uint16 LE = 0x403f = 16447, /256 = 64.2 bpm, RR count=1, RR1=0x03c1=961ms
+        real_payload = bytes.fromhex("a88f69003f4001c103000000000000000101")
+        wp = make_realtime_packet(data=real_payload)
+        result = HeartRateDecoder.decode(wp)
+        assert result is not None
+        assert result.hr_bpm == 64
+        assert result.rr_count == 1
+        assert result.rr_intervals_ms == [961.0]
+
 
 class TestHeartRateDataRepr:
     def test_basic_repr(self):
-        d = HeartRateData(hr_bpm=72, rr_intervals_ms=[])
+        d = HeartRateData(hr_bpm=72, hr_precise=72.0, rr_intervals_ms=[])
         r = repr(d)
         assert "72bpm" in r
         assert "HeartRateData" in r
 
     def test_repr_with_rr(self):
-        d = HeartRateData(hr_bpm=72, rr_intervals_ms=[800.0, 810.0])
+        d = HeartRateData(hr_bpm=72, hr_precise=72.3, rr_intervals_ms=[800.0, 810.0])
         r = repr(d)
         assert "rr=" in r
 
     def test_repr_with_hrv(self):
-        d = HeartRateData(hr_bpm=72, rr_intervals_ms=[800.0, 810.0], hrv_rmssd_ms=10.0)
+        d = HeartRateData(hr_bpm=72, hr_precise=72.0, rr_intervals_ms=[800.0, 810.0], hrv_rmssd_ms=10.0)
         r = repr(d)
         assert "hrv=" in r
 

@@ -40,14 +40,17 @@ STANDARD_HR_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
 
 
 class TestDecodePacket:
-    def test_realtime_data_matches_hr_temp_spo2(self):
-        """A REALTIME_DATA packet can match HR, temp, and SpO2 decoders."""
-        # Craft a payload where byte[1] is a valid HR (72) and also
-        # could match temperature (uint16 at [1:3] → 72 + 256*X)
-        payload = bytes([0x00, 72])
+    def test_realtime_data_matches_hr(self):
+        """A REALTIME_DATA packet with proper format matches HR decoder."""
+        # Build a realistic 17-byte payload: timestamp + HR(72bpm) + no RR + flags
+        payload = struct.pack("<I", 0x08698FA8)  # timestamp
+        payload += struct.pack("<H", int(72 * 256))  # HR = 72 bpm
+        payload += bytes([0])  # RR count = 0
+        payload += struct.pack("<HH", 0, 0)  # RR slots empty
+        payload += b"\x00" * 4  # reserved
+        payload += bytes([0x01, 0x01])  # wearing + sensor flags
         wp = make_realtime_packet(data=payload)
         results = decode_packet(wp)
-        # At minimum HR should match
         types = {r["type"] for r in results}
         assert "heart_rate" in types
 
