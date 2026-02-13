@@ -6,9 +6,10 @@ import struct
 from dataclasses import dataclass
 
 from poohw.decoders.packet import WhoopPacket
+from poohw.protocol import PacketType
 
-# Suspected command IDs for accelerometer data
-ACCEL_COMMAND_IDS = {0x30, 0x31, 0x32}
+# IMU data arrives as REALTIME_IMU_DATA (0x33) or HISTORICAL_IMU_DATA (0x34)
+ACCEL_PACKET_TYPES = {PacketType.REALTIME_IMU_DATA, PacketType.HISTORICAL_IMU_DATA}
 
 
 @dataclass
@@ -58,12 +59,7 @@ class AccelDecoder:
     @staticmethod
     def can_decode(packet: WhoopPacket) -> bool:
         """Check if this packet likely contains accelerometer data."""
-        if packet.command_id in ACCEL_COMMAND_IDS:
-            return True
-        # Heuristic: large payloads with size divisible by 6 (after cmd byte)
-        # are likely accel data
-        data_len = len(packet.payload) - 1  # minus command ID byte
-        if data_len >= 12 and data_len % AccelDecoder.SAMPLE_SIZE == 0:
+        if packet.packet_type in ACCEL_PACKET_TYPES:
             return True
         return False
 

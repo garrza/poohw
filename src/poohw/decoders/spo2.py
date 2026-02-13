@@ -6,9 +6,10 @@ import struct
 from dataclasses import dataclass
 
 from poohw.decoders.packet import WhoopPacket
+from poohw.protocol import PacketType
 
-# Suspected command IDs for SpO2 data
-SPO2_COMMAND_IDS = {0x50, 0x51}
+# SpO2 likely arrives in REALTIME_DATA packets
+SPO2_PACKET_TYPES = {PacketType.REALTIME_DATA}
 
 
 @dataclass
@@ -37,7 +38,7 @@ class SpO2Decoder:
     @staticmethod
     def can_decode(packet: WhoopPacket) -> bool:
         """Check if this packet likely contains SpO2 data."""
-        return packet.command_id in SPO2_COMMAND_IDS
+        return packet.packet_type in SPO2_PACKET_TYPES
 
     @staticmethod
     def decode(packet: WhoopPacket) -> SpO2Data | None:

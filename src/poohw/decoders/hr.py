@@ -7,8 +7,11 @@ from dataclasses import dataclass
 
 from poohw.decoders.packet import WhoopPacket
 
-# Suspected command IDs for HR-related data (to be confirmed via captures)
-HR_COMMAND_IDS = {0x23, 0x24, 0x25}
+from poohw.protocol import PacketType
+
+# REALTIME_DATA (0x28) packets likely carry HR data.
+# Command 0x03 (TOGGLE_REALTIME_HR) enables the stream.
+HR_PACKET_TYPES = {PacketType.REALTIME_DATA, PacketType.REALTIME_RAW_DATA}
 
 
 @dataclass
@@ -40,7 +43,7 @@ class HeartRateDecoder:
     @staticmethod
     def can_decode(packet: WhoopPacket) -> bool:
         """Check if this packet likely contains HR data."""
-        if packet.command_id in HR_COMMAND_IDS:
+        if packet.packet_type in HR_PACKET_TYPES:
             return True
         return False
 

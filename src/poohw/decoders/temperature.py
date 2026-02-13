@@ -6,9 +6,10 @@ import struct
 from dataclasses import dataclass
 
 from poohw.decoders.packet import WhoopPacket
+from poohw.protocol import PacketType
 
-# Suspected command IDs for temperature data
-TEMP_COMMAND_IDS = {0x40, 0x41}
+# Temperature likely arrives in REALTIME_DATA packets
+TEMP_PACKET_TYPES = {PacketType.REALTIME_DATA}
 
 
 @dataclass
@@ -38,7 +39,7 @@ class TemperatureDecoder:
     @staticmethod
     def can_decode(packet: WhoopPacket) -> bool:
         """Check if this packet likely contains temperature data."""
-        return packet.command_id in TEMP_COMMAND_IDS
+        return packet.packet_type in TEMP_PACKET_TYPES
 
     @staticmethod
     def decode(packet: WhoopPacket) -> TemperatureData | None:
