@@ -12,7 +12,7 @@ from poohw.decoders.hr import HeartRateDecoder
 from poohw.decoders.accel import AccelDecoder
 from poohw.decoders.temperature import TemperatureDecoder
 from poohw.decoders.spo2 import SpO2Decoder
-from poohw.protocol import CMD_FROM_STRAP_UUID, DATA_FROM_STRAP_UUID
+from poohw.protocol import is_proprietary_uuid
 
 
 DECODERS = [
@@ -87,10 +87,7 @@ def replay_file(
                 continue
 
             # Only try to decode proprietary packets
-            is_proprietary = any(
-                uuid.startswith(prefix)
-                for prefix in ("61080003", "61080004")
-            ) or uuid in (CMD_FROM_STRAP_UUID, DATA_FROM_STRAP_UUID)
+            is_proprietary = is_proprietary_uuid(uuid)
 
             if not is_proprietary:
                 if verbose:

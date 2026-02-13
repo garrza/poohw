@@ -8,27 +8,15 @@ from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
 from poohw.protocol import (
-    CMD_FROM_STRAP_UUID,
-    CMD_TO_STRAP_UUID,
-    DATA_FROM_STRAP_UUID,
-    EVENTS_FROM_STRAP_UUID,
-    WHOOP_SERVICE_UUID,
     Command,
     PacketType,
     build_packet,
+    char_role,
     format_packet,
     hex_to_bytes,
+    is_proprietary_uuid,
 )
 from poohw.scanner import find_whoop
-
-
-def _find_char_by_uuid(client: BleakClient, uuid: str):
-    """Find a characteristic by UUID, returning None if not found."""
-    for service in client.services:
-        for char in service.characteristics:
-            if char.uuid == uuid:
-                return char
-    return None
 
 
 def _dump_services(client: BleakClient) -> None:
@@ -38,56 +26,33 @@ def _dump_services(client: BleakClient) -> None:
         print(f"    Service: {service.uuid} [{service.description}]")
         for char in service.characteristics:
             props = ", ".join(sorted(char.properties))
-            print(f"      {char.uuid} [{props}]")
+            role = char_role(char.uuid)
+            tag = f" <-- {role}" if role else ""
+            print(f"      {char.uuid} [{props}]{tag}")
 
 
 def _find_write_char(client: BleakClient) -> str | None:
-    """Find the writable characteristic on the Whoop proprietary service.
-
-    Tries the known CMD_TO_STRAP UUID first, then falls back to searching
-    for any writable characteristic under a 61080xxx service.
-    """
-    # Try exact match first
-    char = _find_char_by_uuid(client, CMD_TO_STRAP_UUID)
-    if char and ("write" in char.properties or "write-without-response" in char.properties):
-        return char.uuid
-
-    # Fall back: search for writable chars in 610800xx services
+    """Find the CMD_TO_STRAP writable characteristic (any UUID family)."""
     for service in client.services:
-        if service.uuid.startswith("61080"):
+        if is_proprietary_uuid(service.uuid):
             for char in service.characteristics:
                 if "write" in char.properties or "write-without-response" in char.properties:
-                    print(f"  Using writable characteristic: {char.uuid}")
                     return char.uuid
-
     return None
 
 
 def _find_notify_chars(client: BleakClient) -> list[tuple[str, str]]:
-    """Find all notify-capable characteristics on 610800xx services.
+    """Find all notify-capable characteristics on the proprietary service.
 
     Returns list of (uuid, friendly_name) tuples.
     """
-    known = {
-        CMD_FROM_STRAP_UUID: "CMD_FROM_STRAP",
-        EVENTS_FROM_STRAP_UUID: "EVENTS_FROM_STRAP",
-        DATA_FROM_STRAP_UUID: "DATA_FROM_STRAP",
-    }
     result: list[tuple[str, str]] = []
-
-    # Try known UUIDs first
-    for uuid, name in known.items():
-        char = _find_char_by_uuid(client, uuid)
-        if char and "notify" in char.properties:
-            result.append((uuid, name))
-
-    # Also pick up any other notify chars on 610800xx services
     for service in client.services:
-        if service.uuid.startswith("61080"):
+        if is_proprietary_uuid(service.uuid):
             for char in service.characteristics:
-                if "notify" in char.properties and char.uuid not in known:
-                    result.append((char.uuid, char.uuid[:12] + "..."))
-
+                if "notify" in char.properties:
+                    name = char_role(char.uuid) or char.uuid[:12] + "..."
+                    result.append((char.uuid, name))
     return result
 
 
@@ -187,48 +152,77 @@ async def send_built_command(
     return responses
 
 
-async def vibrate(address: str | None = None, mode: str = "haptics") -> None:
-    """Make the Whoop vibrate."""
-    if address is None:
+async def _send_to_one(address: str, cmd: int, data: bytes, label: str) -> None:
+    """Connect to one Whoop and send a command."""
+    print(f"[{address[:8]}...] Connecting...")
+    try:
+        async with BleakClient(address) as client:
+            print(f"[{address[:8]}...] Connected. Sending {label}...")
+            await send_built_command(client, cmd, data, response_timeout=3.0)
+            print(f"[{address[:8]}...] Done.")
+    except Exception as e:
+        print(f"[{address[:8]}...] Error: {e}")
+
+
+async def _get_addresses(address: str | None, all_devices: bool) -> list[str]:
+    """Resolve target addresses from flags."""
+    if address:
+        return [address]
+    if all_devices:
+        from poohw.scanner import scan
+        results = await scan()
+        if not results:
+            print("No Whoop devices found.")
+            return []
+        return [dev.address for dev, _ in results]
+    else:
         device = await find_whoop()
         if device is None:
             print("No Whoop found.")
-            return
-        address = device.address
+            return []
+        return [device.address]
+
+
+async def vibrate(
+    address: str | None = None,
+    mode: str = "haptics",
+    all_devices: bool = False,
+) -> None:
+    """Make Whoop(s) vibrate."""
+    addresses = await _get_addresses(address, all_devices)
+    if not addresses:
+        return
 
     cmd = Command.RUN_HAPTICS_PATTERN if mode == "haptics" else Command.RUN_ALARM
-    print(f"Connecting to {address}...")
+    label = Command(cmd).name
 
-    async with BleakClient(address) as client:
-        print(f"Connected. Sending {Command(cmd).name}...")
-        responses = await send_built_command(client, cmd, b"\x00")
-
-        if responses:
-            print(f"\n{len(responses)} response(s):")
-            for r in responses:
-                print(f"  [{r['timestamp']}] {r['uuid']}: {r['formatted']}")
-        else:
-            print("No response (command may have still worked).")
+    if len(addresses) == 1:
+        await _send_to_one(addresses[0], cmd, b"\x00", label)
+    else:
+        print(f"\nSending {label} to {len(addresses)} devices in parallel...\n")
+        await asyncio.gather(*[
+            _send_to_one(addr, cmd, b"\x00", label)
+            for addr in addresses
+        ])
 
 
-async def stop_haptics(address: str | None = None) -> None:
-    """Stop any ongoing haptic vibration."""
-    if address is None:
-        device = await find_whoop()
-        if device is None:
-            print("No Whoop found.")
-            return
-        address = device.address
+async def stop_haptics(
+    address: str | None = None,
+    all_devices: bool = False,
+) -> None:
+    """Stop haptic vibration on Whoop(s)."""
+    addresses = await _get_addresses(address, all_devices)
+    if not addresses:
+        return
 
-    print(f"Connecting to {address}...")
-    async with BleakClient(address) as client:
-        print("Connected. Sending STOP_HAPTICS...")
-        responses = await send_built_command(client, Command.STOP_HAPTICS, b"\x00")
-        if responses:
-            for r in responses:
-                print(f"  {r['uuid']}: {r['formatted']}")
-        else:
-            print("No response.")
+    if len(addresses) == 1:
+        await _send_to_one(addresses[0], Command.STOP_HAPTICS, b"\x00", "STOP_HAPTICS")
+    else:
+        print(f"\nSending STOP_HAPTICS to {len(addresses)} devices in parallel...\n")
+        await asyncio.gather(*[
+            _send_to_one(addr, Command.STOP_HAPTICS, b"\x00", "STOP_HAPTICS")
+            for addr in addresses
+        ])
 
 
 async def interactive_repl(address: str | None = None) -> None:

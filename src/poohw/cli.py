@@ -119,20 +119,22 @@ def repl(address: str | None) -> None:
 @click.option("--address", "-a", default=None, help="BLE address to connect to.")
 @click.option("--mode", "-m", type=click.Choice(["haptics", "alarm"]), default="haptics",
               help="Vibration mode: haptics pattern or alarm.")
-def vibrate_cmd(address: str | None, mode: str) -> None:
-    """Make the Whoop vibrate."""
+@click.option("--all", "all_devices", is_flag=True, help="Send to all discovered Whoops.")
+def vibrate_cmd(address: str | None, mode: str, all_devices: bool) -> None:
+    """Make Whoop(s) vibrate."""
     from poohw.commander import vibrate
 
-    asyncio.run(vibrate(address, mode))
+    asyncio.run(vibrate(address, mode, all_devices))
 
 
 @main.command("stop-haptics")
 @click.option("--address", "-a", default=None, help="BLE address to connect to.")
-def stop_haptics_cmd(address: str | None) -> None:
+@click.option("--all", "all_devices", is_flag=True, help="Send to all discovered Whoops.")
+def stop_haptics_cmd(address: str | None, all_devices: bool) -> None:
     """Stop any ongoing haptic vibration."""
     from poohw.commander import stop_haptics
 
-    asyncio.run(stop_haptics(address))
+    asyncio.run(stop_haptics(address, all_devices))
 
 
 if __name__ == "__main__":

@@ -18,17 +18,66 @@ import zlib
 from enum import IntEnum
 
 # ---------------------------------------------------------------------------
-# BLE UUIDs
+# BLE UUIDs — two known UUID families for the proprietary service
 # ---------------------------------------------------------------------------
-WHOOP_SERVICE_UUID = "61080001-8d6d-82b8-614a-1c8cb0f8dcc6"
-CMD_TO_STRAP_UUID = "61080002-8d6d-82b8-614a-1c8cb0f8dcc6"
-CMD_FROM_STRAP_UUID = "61080003-8d6d-82b8-614a-1c8cb0f8dcc6"
-EVENTS_FROM_STRAP_UUID = "61080004-8d6d-82b8-614a-1c8cb0f8dcc6"
-DATA_FROM_STRAP_UUID = "61080005-8d6d-82b8-614a-1c8cb0f8dcc6"
-MEMFAULT_UUID = "61080007-8d6d-82b8-614a-1c8cb0f8dcc6"
+# Gen1 UUIDs (documented in jogolden/whoomp, older firmware)
+_GEN1_PREFIX = "61080"
+WHOOP_SERVICE_UUID_GEN1 = "61080001-8d6d-82b8-614a-1c8cb0f8dcc6"
+CMD_TO_STRAP_UUID_GEN1 = "61080002-8d6d-82b8-614a-1c8cb0f8dcc6"
+CMD_FROM_STRAP_UUID_GEN1 = "61080003-8d6d-82b8-614a-1c8cb0f8dcc6"
+EVENTS_FROM_STRAP_UUID_GEN1 = "61080004-8d6d-82b8-614a-1c8cb0f8dcc6"
+DATA_FROM_STRAP_UUID_GEN1 = "61080005-8d6d-82b8-614a-1c8cb0f8dcc6"
+MEMFAULT_UUID_GEN1 = "61080007-8d6d-82b8-614a-1c8cb0f8dcc6"
+
+# Gen2 UUIDs (newer firmware, e.g. WG50 / firmware 50.x)
+_GEN2_PREFIX = "fd4b0"
+WHOOP_SERVICE_UUID_GEN2 = "fd4b0001-cce1-4033-93ce-002d5875f58a"
+CMD_TO_STRAP_UUID_GEN2 = "fd4b0002-cce1-4033-93ce-002d5875f58a"
+CMD_FROM_STRAP_UUID_GEN2 = "fd4b0003-cce1-4033-93ce-002d5875f58a"
+EVENTS_FROM_STRAP_UUID_GEN2 = "fd4b0004-cce1-4033-93ce-002d5875f58a"
+DATA_FROM_STRAP_UUID_GEN2 = "fd4b0005-cce1-4033-93ce-002d5875f58a"
+MEMFAULT_UUID_GEN2 = "fd4b0007-cce1-4033-93ce-002d5875f58a"
+
+# Default aliases (legacy compat)
+WHOOP_SERVICE_UUID = WHOOP_SERVICE_UUID_GEN1
+CMD_TO_STRAP_UUID = CMD_TO_STRAP_UUID_GEN1
+CMD_FROM_STRAP_UUID = CMD_FROM_STRAP_UUID_GEN1
+EVENTS_FROM_STRAP_UUID = EVENTS_FROM_STRAP_UUID_GEN1
+DATA_FROM_STRAP_UUID = DATA_FROM_STRAP_UUID_GEN1
+MEMFAULT_UUID = MEMFAULT_UUID_GEN1
+
+# Both families use the same suffix pattern:
+#   0001=service, 0002=cmd_to, 0003=cmd_from, 0004=events, 0005=data, 0007=memfault
+PROPRIETARY_SERVICE_PREFIXES = (_GEN1_PREFIX, _GEN2_PREFIX)
+
+# Role suffix → friendly name
+CHARACTERISTIC_ROLES = {
+    "0002": "CMD_TO_STRAP",
+    "0003": "CMD_FROM_STRAP",
+    "0004": "EVENTS_FROM_STRAP",
+    "0005": "DATA_FROM_STRAP",
+    "0007": "MEMFAULT",
+}
 
 HR_SERVICE_UUID = "0000180d-0000-1000-8000-00805f9b34fb"
 HR_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
+
+
+def is_proprietary_uuid(uuid: str) -> bool:
+    """Check if a UUID belongs to either Whoop proprietary service family."""
+    return any(uuid.startswith(p) for p in PROPRIETARY_SERVICE_PREFIXES)
+
+
+def char_role(uuid: str) -> str | None:
+    """Get the role name for a proprietary characteristic UUID, or None."""
+    for prefix in PROPRIETARY_SERVICE_PREFIXES:
+        if uuid.startswith(prefix):
+            suffix = uuid[len(prefix):len(prefix) + 4]  # e.g. "0002"
+            # Handle both "fd4b0002" (5-char prefix) and "610800002" patterns
+            for role_suffix, name in CHARACTERISTIC_ROLES.items():
+                if suffix.startswith(role_suffix) or uuid[4:8] == role_suffix:
+                    return name
+    return None
 
 # ---------------------------------------------------------------------------
 # Packet framing constants
