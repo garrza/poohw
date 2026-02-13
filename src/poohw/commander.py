@@ -20,37 +20,11 @@ from poohw.protocol import (
     build_abort_historical,
     build_get_battery,
     build_get_hello,
-    char_role,
     format_packet,
     hex_to_bytes,
-    is_proprietary_uuid,
 )
+from poohw.ble import dump_services, find_notify_chars, find_write_char
 from poohw.scanner import find_whoop
-
-
-def _dump_services(client: BleakClient) -> None:
-    """Print all discovered services and characteristics."""
-    print("\n  Available services/characteristics:")
-    for service in client.services:
-        print(f"    Service: {service.uuid} [{service.description}]")
-        for char in service.characteristics:
-            props = ", ".join(sorted(char.properties))
-            role = char_role(char.uuid)
-            tag = f" <-- {role}" if role else ""
-            print(f"      {char.uuid} [{props}]{tag}")
-
-
-def _find_write_char(client: BleakClient) -> str | None:
-    """Find the CMD_TO_STRAP writable characteristic (any UUID family)."""
-    for service in client.services:
-        if is_proprietary_uuid(service.uuid):
-            for char in service.characteristics:
-                if (
-                    "write" in char.properties
-                    or "write-without-response" in char.properties
-                ):
-                    return char.uuid
-    return None
 
 
 async def request_historical_data(client: BleakClient) -> bool:
@@ -59,7 +33,7 @@ async def request_historical_data(client: BleakClient) -> bool:
     Protocol order (per docs): GET_DATA_RANGE → SET_READ_POINTER → SEND_HISTORICAL_DATA.
     Without the first two steps many bands never start streaming.
     """
-    write_uuid = _find_write_char(client)
+    write_uuid = find_write_char(client)
     if write_uuid is None:
         return False
 
@@ -76,21 +50,6 @@ async def request_historical_data(client: BleakClient) -> bool:
     return True
 
 
-def _find_notify_chars(client: BleakClient) -> list[tuple[str, str]]:
-    """Find all notify-capable characteristics on the proprietary service.
-
-    Returns list of (uuid, friendly_name) tuples.
-    """
-    result: list[tuple[str, str]] = []
-    for service in client.services:
-        if is_proprietary_uuid(service.uuid):
-            for char in service.characteristics:
-                if "notify" in char.properties:
-                    name = char_role(char.uuid) or char.uuid[:12] + "..."
-                    result.append((char.uuid, name))
-    return result
-
-
 async def send_command(
     client: BleakClient,
     cmd_hex: str,
@@ -100,10 +59,10 @@ async def send_command(
     responses: list[dict] = []
     cmd_bytes = hex_to_bytes(cmd_hex)
 
-    write_uuid = _find_write_char(client)
+    write_uuid = find_write_char(client)
     if write_uuid is None:
         print("  Error: No writable characteristic found on the Whoop.")
-        _dump_services(client)
+        dump_services(client)
         return responses
 
     def make_handler(name: str):
@@ -121,7 +80,7 @@ async def send_command(
 
         return handler
 
-    notify_chars = _find_notify_chars(client)
+    notify_chars = find_notify_chars(client)
     for uuid, name in notify_chars:
         try:
             await client.start_notify(uuid, make_handler(name))
@@ -151,10 +110,10 @@ async def send_built_command(
     pkt = build_packet(PacketType.COMMAND, command, data)
     responses: list[dict] = []
 
-    write_uuid = _find_write_char(client)
+    write_uuid = find_write_char(client)
     if write_uuid is None:
         print("  Error: No writable characteristic found on the Whoop.")
-        _dump_services(client)
+        dump_services(client)
         return responses
 
     def make_handler(name: str):
@@ -172,7 +131,7 @@ async def send_built_command(
 
         return handler
 
-    notify_chars = _find_notify_chars(client)
+    notify_chars = find_notify_chars(client)
     for uuid, name in notify_chars:
         try:
             await client.start_notify(uuid, make_handler(name))
@@ -282,10 +241,10 @@ async def interactive_repl(address: str | None = None) -> None:
     async with BleakClient(address) as client:
         print("Connected.\n")
 
-        write_uuid = _find_write_char(client)
+        write_uuid = find_write_char(client)
         if write_uuid is None:
             print("No writable characteristic found.")
-            _dump_services(client)
+            dump_services(client)
             return
 
         print(f"Write characteristic: {write_uuid}")
@@ -297,7 +256,7 @@ async def interactive_repl(address: str | None = None) -> None:
 
             return handler
 
-        notify_chars = _find_notify_chars(client)
+        notify_chars = find_notify_chars(client)
         for uuid, name in notify_chars:
             try:
                 await client.start_notify(uuid, make_handler(name))
@@ -362,7 +321,7 @@ async def interactive_repl(address: str | None = None) -> None:
                 break
 
             if user_input.lower() == "services":
-                _dump_services(client)
+                dump_services(client)
                 continue
 
             if user_input.lower() in prebuilt_shortcuts:

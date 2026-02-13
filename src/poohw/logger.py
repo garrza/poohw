@@ -10,24 +10,11 @@ from pathlib import Path
 from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
-from poohw.protocol import (
-    build_toggle_realtime_hr,
-    build_toggle_imu,
-    is_proprietary_uuid,
-)
+from poohw.ble import find_write_char
+from poohw.protocol import build_toggle_realtime_hr, build_toggle_imu
 from poohw.scanner import find_whoop
 
 LOGS_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
-
-
-def _find_write_char(client: BleakClient) -> str | None:
-    """Find the CMD_TO_STRAP writable characteristic."""
-    for service in client.services:
-        if is_proprietary_uuid(service.uuid):
-            for char in service.characteristics:
-                if "write" in char.properties or "write-without-response" in char.properties:
-                    return char.uuid
-    return None
 
 
 async def capture(
@@ -88,8 +75,11 @@ async def capture(
                 f.write(line + "\n")
                 f.flush()
                 count += 1
-                print(f"  [{now}] 0x{char_handle:04X} ({char_uuid[:8]}...) "
-                      f"len={len(data)} {data.hex()}")
+                print(
+                    f"  [{now}] 0x{char_handle:04X} ({char_uuid[:8]}...) "
+                    f"len={len(data)} {data.hex()}"
+                )
+
             return handler
 
         # Subscribe to all notify-capable characteristics
@@ -98,9 +88,13 @@ async def capture(
             for char in service.characteristics:
                 if "notify" in char.properties:
                     try:
-                        await client.start_notify(char, make_handler(char.uuid, char.handle))
+                        await client.start_notify(
+                            char, make_handler(char.uuid, char.handle)
+                        )
                         notify_chars.append(char)
-                        print(f"Subscribed: {char.uuid} (0x{char.handle:04X}) [{char.description}]")
+                        print(
+                            f"Subscribed: {char.uuid} (0x{char.handle:04X}) [{char.description}]"
+                        )
                     except Exception as e:
                         print(f"Failed to subscribe {char.uuid}: {e}")
 
@@ -110,7 +104,7 @@ async def capture(
             return
 
         # Enable realtime streams via proprietary commands
-        write_uuid = _find_write_char(client)
+        write_uuid = find_write_char(client)
         if write_uuid and (enable_hr or enable_imu):
             if enable_hr:
                 print("Enabling realtime HR streaming...")
@@ -121,13 +115,20 @@ async def capture(
                 await client.write_gatt_char(write_uuid, build_toggle_imu(True))
                 await asyncio.sleep(0.3)
         elif (enable_hr or enable_imu) and write_uuid is None:
-            print("Warning: no writable characteristic found; cannot enable HR/IMU streams.")
+            print(
+                "Warning: no writable characteristic found; cannot enable HR/IMU streams."
+            )
 
         if request_history:
             from poohw.commander import request_historical_data
-            print("Requesting historical data (GET_DATA_RANGE → SET_READ_POINTER → SEND_HISTORICAL_DATA)...")
+
+            print(
+                "Requesting historical data (GET_DATA_RANGE → SET_READ_POINTER → SEND_HISTORICAL_DATA)..."
+            )
             if await request_historical_data(client):
-                print("  Full workflow sent. Keep capturing 30–90s for 0x5C/accel packets on DATA_FROM_STRAP.")
+                print(
+                    "  Full workflow sent. Keep capturing 30–90s for 0x5C/accel packets on DATA_FROM_STRAP."
+                )
             else:
                 print("  Could not find write characteristic; skipping request.")
             # Brief pause so the first burst doesn't get lost
@@ -141,7 +142,9 @@ async def capture(
         if request_history:
             streams.append("history")
         stream_label = " + ".join(streams) if streams else "passive"
-        print(f"\nCapturing [{stream_label}] from {len(notify_chars)} characteristics → {outpath}")
+        print(
+            f"\nCapturing [{stream_label}] from {len(notify_chars)} characteristics → {outpath}"
+        )
         print("Press Ctrl+C to stop.\n")
 
         try:
@@ -158,9 +161,13 @@ async def capture(
             if write_uuid:
                 try:
                     if enable_hr:
-                        await client.write_gatt_char(write_uuid, build_toggle_realtime_hr(False))
+                        await client.write_gatt_char(
+                            write_uuid, build_toggle_realtime_hr(False)
+                        )
                     if enable_imu:
-                        await client.write_gatt_char(write_uuid, build_toggle_imu(False))
+                        await client.write_gatt_char(
+                            write_uuid, build_toggle_imu(False)
+                        )
                 except Exception:
                     pass  # best-effort cleanup
             f.close()

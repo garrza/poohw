@@ -17,21 +17,17 @@ from datetime import datetime, timezone
 from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
+from poohw.ble import find_notify_chars, find_write_char
 from poohw.decoders.hr import HeartRateDecoder
 from poohw.decoders.accel import AccelDecoder
 from poohw.decoders.packet import PacketDecoder
 from poohw.protocol import (
-    PacketType,
-    build_packet,
+    HR_SERVICE_UUID,
+    HR_MEASUREMENT_UUID,
     build_toggle_realtime_hr,
     build_toggle_imu,
-    is_proprietary_uuid,
 )
 from poohw.scanner import find_whoop
-
-# Standard BLE UUIDs (kept for reference / external consumers)
-HR_SERVICE_UUID = "0000180d-0000-1000-8000-00805f9b34fb"
-HR_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
 
 
 # ---------------------------------------------------------------------------
@@ -93,16 +89,6 @@ def parse_heart_rate(data: bytearray) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _find_write_char(client: BleakClient) -> str | None:
-    """Find the CMD_TO_STRAP writable characteristic."""
-    for service in client.services:
-        if is_proprietary_uuid(service.uuid):
-            for char in service.characteristics:
-                if "write" in char.properties or "write-without-response" in char.properties:
-                    return char.uuid
-    return None
-
-
 async def stream_heart_rate(
     address: str | None = None,
     enable_imu: bool = False,
@@ -128,7 +114,7 @@ async def stream_heart_rate(
     async with BleakClient(address) as client:
         print(f"Connected. MTU={client.mtu_size}")
 
-        write_uuid = _find_write_char(client)
+        write_uuid = find_write_char(client)
         if write_uuid is None:
             print("Error: no writable proprietary characteristic found.")
             return
@@ -173,22 +159,18 @@ async def stream_heart_rate(
                     return
 
         # Subscribe to all proprietary notify characteristics
-        notify_uuids: list[str] = []
-        for service in client.services:
-            if is_proprietary_uuid(service.uuid):
-                for char in service.characteristics:
-                    if "notify" in char.properties:
-                        try:
-                            await client.start_notify(char, _on_notification)
-                            notify_uuids.append(char.uuid)
-                        except Exception as e:
-                            print(f"  Warning: failed to subscribe {char.uuid}: {e}")
+        notify_chars = find_notify_chars(client)
+        for uuid, _name in notify_chars:
+            try:
+                await client.start_notify(uuid, _on_notification)
+            except Exception as e:
+                print(f"  Warning: failed to subscribe {uuid}: {e}")
 
-        if not notify_uuids:
+        if not notify_chars:
             print("Error: no notify characteristics found on proprietary service.")
             return
 
-        print(f"Subscribed to {len(notify_uuids)} characteristic(s).")
+        print(f"Subscribed to {len(notify_chars)} characteristic(s).")
 
         # Enable realtime HR
         print("Enabling realtime HR...")
