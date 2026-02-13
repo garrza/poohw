@@ -10,9 +10,24 @@ from pathlib import Path
 from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
+from poohw.protocol import (
+    build_toggle_realtime_hr,
+    build_toggle_imu,
+    is_proprietary_uuid,
+)
 from poohw.scanner import find_whoop
 
 LOGS_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
+
+
+def _find_write_char(client: BleakClient) -> str | None:
+    """Find the CMD_TO_STRAP writable characteristic."""
+    for service in client.services:
+        if is_proprietary_uuid(service.uuid):
+            for char in service.characteristics:
+                if "write" in char.properties or "write-without-response" in char.properties:
+                    return char.uuid
+    return None
 
 
 async def capture(
@@ -20,6 +35,8 @@ async def capture(
     duration: float | None = None,
     output: str | None = None,
     request_history: bool = False,
+    enable_hr: bool = True,
+    enable_imu: bool = False,
 ) -> None:
     """Subscribe to all notify characteristics and log raw packets.
 
@@ -29,6 +46,8 @@ async def capture(
         output: Output file path. If None, auto-generates in logs/.
         request_history: If True, send SEND_HISTORICAL_DATA after subscribing
             so the band pushes historical (0x5C, accel, etc.) packets.
+        enable_hr: If True, send TOGGLE_REALTIME_HR to start HR streaming.
+        enable_imu: If True, send TOGGLE_IMU_MODE to start accelerometer streaming.
     """
     if address is None:
         device = await find_whoop()
@@ -90,6 +109,20 @@ async def capture(
             f.close()
             return
 
+        # Enable realtime streams via proprietary commands
+        write_uuid = _find_write_char(client)
+        if write_uuid and (enable_hr or enable_imu):
+            if enable_hr:
+                print("Enabling realtime HR streaming...")
+                await client.write_gatt_char(write_uuid, build_toggle_realtime_hr(True))
+                await asyncio.sleep(0.3)
+            if enable_imu:
+                print("Enabling realtime IMU streaming...")
+                await client.write_gatt_char(write_uuid, build_toggle_imu(True))
+                await asyncio.sleep(0.3)
+        elif (enable_hr or enable_imu) and write_uuid is None:
+            print("Warning: no writable characteristic found; cannot enable HR/IMU streams.")
+
         if request_history:
             from poohw.commander import request_historical_data
             print("Requesting historical data (GET_DATA_RANGE → SET_READ_POINTER → SEND_HISTORICAL_DATA)...")
@@ -100,7 +133,15 @@ async def capture(
             # Brief pause so the first burst doesn't get lost
             await asyncio.sleep(0.5)
 
-        print(f"\nCapturing from {len(notify_chars)} characteristics → {outpath}")
+        streams = []
+        if enable_hr:
+            streams.append("HR")
+        if enable_imu:
+            streams.append("IMU")
+        if request_history:
+            streams.append("history")
+        stream_label = " + ".join(streams) if streams else "passive"
+        print(f"\nCapturing [{stream_label}] from {len(notify_chars)} characteristics → {outpath}")
         print("Press Ctrl+C to stop.\n")
 
         try:
@@ -113,6 +154,15 @@ async def capture(
         except asyncio.CancelledError:
             pass
         finally:
+            # Disable streams before disconnecting
+            if write_uuid:
+                try:
+                    if enable_hr:
+                        await client.write_gatt_char(write_uuid, build_toggle_realtime_hr(False))
+                    if enable_imu:
+                        await client.write_gatt_char(write_uuid, build_toggle_imu(False))
+                except Exception:
+                    pass  # best-effort cleanup
             f.close()
             print(f"\nCapture complete. {count} packets → {outpath}")
 

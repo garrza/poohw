@@ -31,12 +31,13 @@ def discover(address: str | None, output: str) -> None:
 
 @main.command()
 @click.option("--address", "-a", default=None, help="BLE address to connect to.")
-def stream(address: str | None) -> None:
-    """Stream live heart rate from a Whoop."""
+@click.option("--imu", is_flag=True, help="Also stream accelerometer (IMU) data.")
+def stream(address: str | None, imu: bool) -> None:
+    """Stream live heart rate (and optional IMU) from a Whoop."""
     from poohw.heart_rate import stream_heart_rate
 
     try:
-        asyncio.run(stream_heart_rate(address))
+        asyncio.run(stream_heart_rate(address, enable_imu=imu))
     except KeyboardInterrupt:
         click.echo("\nStopped.")
 
@@ -46,12 +47,30 @@ def stream(address: str | None) -> None:
 @click.option("--duration", "-d", default=None, type=float, help="Capture duration in seconds.")
 @click.option("--output", "-o", default=None, help="Output file path.")
 @click.option("--history", "-H", is_flag=True, help="Request historical data so band streams 0x5C/accel packets.")
-def capture(address: str | None, duration: float | None, output: str | None, history: bool) -> None:
+@click.option("--hr", is_flag=True, default=True, help="Enable realtime HR streaming (default: on).")
+@click.option("--no-hr", is_flag=True, help="Disable automatic realtime HR streaming.")
+@click.option("--imu", is_flag=True, help="Enable realtime accelerometer (IMU) streaming.")
+def capture(
+    address: str | None,
+    duration: float | None,
+    output: str | None,
+    history: bool,
+    hr: bool,
+    no_hr: bool,
+    imu: bool,
+) -> None:
     """Capture raw BLE packets from a Whoop to a file."""
     from poohw.logger import capture as do_capture
 
+    enable_hr = hr and not no_hr
+
     try:
-        asyncio.run(do_capture(address, duration, output, request_history=history))
+        asyncio.run(do_capture(
+            address, duration, output,
+            request_history=history,
+            enable_hr=enable_hr,
+            enable_imu=imu,
+        ))
     except KeyboardInterrupt:
         click.echo("\nStopped.")
 
