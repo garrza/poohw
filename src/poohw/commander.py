@@ -45,7 +45,10 @@ def _find_write_char(client: BleakClient) -> str | None:
     for service in client.services:
         if is_proprietary_uuid(service.uuid):
             for char in service.characteristics:
-                if "write" in char.properties or "write-without-response" in char.properties:
+                if (
+                    "write" in char.properties
+                    or "write-without-response" in char.properties
+                ):
                     return char.uuid
     return None
 
@@ -106,13 +109,16 @@ async def send_command(
     def make_handler(name: str):
         def handler(_char: BleakGATTCharacteristic, data: bytearray) -> None:
             now = datetime.now(timezone.utc).isoformat()
-            responses.append({
-                "timestamp": now,
-                "uuid": name,
-                "data": bytes(data),
-                "hex": data.hex(),
-                "formatted": format_packet(data),
-            })
+            responses.append(
+                {
+                    "timestamp": now,
+                    "uuid": name,
+                    "data": bytes(data),
+                    "hex": data.hex(),
+                    "formatted": format_packet(data),
+                }
+            )
+
         return handler
 
     notify_chars = _find_notify_chars(client)
@@ -154,13 +160,16 @@ async def send_built_command(
     def make_handler(name: str):
         def handler(_char: BleakGATTCharacteristic, data: bytearray) -> None:
             now = datetime.now(timezone.utc).isoformat()
-            responses.append({
-                "timestamp": now,
-                "uuid": name,
-                "data": bytes(data),
-                "hex": data.hex(),
-                "formatted": format_packet(data),
-            })
+            responses.append(
+                {
+                    "timestamp": now,
+                    "uuid": name,
+                    "data": bytes(data),
+                    "hex": data.hex(),
+                    "formatted": format_packet(data),
+                }
+            )
+
         return handler
 
     notify_chars = _find_notify_chars(client)
@@ -202,6 +211,7 @@ async def _get_addresses(address: str | None, all_devices: bool) -> list[str]:
         return [address]
     if all_devices:
         from poohw.scanner import scan
+
         results = await scan()
         if not results:
             print("No Whoop devices found.")
@@ -232,10 +242,9 @@ async def vibrate(
         await _send_to_one(addresses[0], cmd, b"\x00", label)
     else:
         print(f"\nSending {label} to {len(addresses)} devices in parallel...\n")
-        await asyncio.gather(*[
-            _send_to_one(addr, cmd, b"\x00", label)
-            for addr in addresses
-        ])
+        await asyncio.gather(
+            *[_send_to_one(addr, cmd, b"\x00", label) for addr in addresses]
+        )
 
 
 async def stop_haptics(
@@ -251,10 +260,12 @@ async def stop_haptics(
         await _send_to_one(addresses[0], Command.STOP_HAPTICS, b"\x00", "STOP_HAPTICS")
     else:
         print(f"\nSending STOP_HAPTICS to {len(addresses)} devices in parallel...\n")
-        await asyncio.gather(*[
-            _send_to_one(addr, Command.STOP_HAPTICS, b"\x00", "STOP_HAPTICS")
-            for addr in addresses
-        ])
+        await asyncio.gather(
+            *[
+                _send_to_one(addr, Command.STOP_HAPTICS, b"\x00", "STOP_HAPTICS")
+                for addr in addresses
+            ]
+        )
 
 
 async def interactive_repl(address: str | None = None) -> None:
@@ -283,6 +294,7 @@ async def interactive_repl(address: str | None = None) -> None:
             def handler(_char: BleakGATTCharacteristic, data: bytearray) -> None:
                 now = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
                 print(f"  <- {name} [{now}] {format_packet(data)}")
+
             return handler
 
         notify_chars = _find_notify_chars(client)
@@ -369,7 +381,9 @@ async def interactive_repl(address: str | None = None) -> None:
             else:
                 try:
                     cmd_bytes = hex_to_bytes(user_input)
-                    print(f"  -> Sending raw: {cmd_bytes.hex()} ({len(cmd_bytes)} bytes)")
+                    print(
+                        f"  -> Sending raw: {cmd_bytes.hex()} ({len(cmd_bytes)} bytes)"
+                    )
                     await client.write_gatt_char(write_uuid, cmd_bytes)
                     await asyncio.sleep(3)
                 except ValueError as e:
