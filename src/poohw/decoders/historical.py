@@ -38,6 +38,14 @@ from dataclasses import dataclass, field
 from poohw.decoders.packet import WhoopPacket
 from poohw.protocol import PacketType, HistoricalRecordType
 
+# Re-export HRV / SpO2 helpers from the analytics layer.
+# They originally lived here; keep the old import paths working.
+from poohw.analytics.features import (  # noqa: F401
+    compute_rmssd,
+    lnrmssd_score,
+)
+from poohw.analytics.spo2 import estimate_spo2_from_ratio  # noqa: F401
+
 
 # Packet types that carry historical data
 HISTORICAL_PACKET_TYPES = {
@@ -139,51 +147,6 @@ class HistoricalEventRecord:
 
     def __repr__(self) -> str:
         return f"HistEvent(t={self.timestamp}, id=0x{self.event_id:02X}, data={self.event_data.hex()})"
-
-
-# ---------------------------------------------------------------------------
-# HRV helpers
-# ---------------------------------------------------------------------------
-
-
-def compute_rmssd(rr_intervals: list[float]) -> float | None:
-    """Root mean square of successive RR-interval differences (ms)."""
-    if len(rr_intervals) < 2:
-        return None
-    diffs = [rr_intervals[i + 1] - rr_intervals[i] for i in range(len(rr_intervals) - 1)]
-    mean_sq = sum(d * d for d in diffs) / len(diffs)
-    return round(mean_sq ** 0.5, 2)
-
-
-def lnrmssd_score(rmssd_ms: float) -> float:
-    """HRV score: ln(RMSSD) / 6.5 * 100.
-
-    This maps the natural log of RMSSD into a 0-100-ish scale used by
-    consumer wearables (Whoop, Oura, etc.).
-    """
-    if rmssd_ms <= 0:
-        return 0.0
-    return round(math.log(rmssd_ms) / 6.5 * 100.0, 1)
-
-
-# ---------------------------------------------------------------------------
-# SpO2 estimation from red/IR ratio (Beer-Lambert)
-# ---------------------------------------------------------------------------
-
-
-def estimate_spo2_from_ratio(r: float) -> float:
-    """Estimate SpO2% from the red/IR AC-DC ratio using a standard
-    piecewise-linear calibration curve.
-
-    The "standard" empirical curve used in most pulse oximeters:
-        SpO2 = 110 - 25 * R
-
-    where R = (AC_red / DC_red) / (AC_ir / DC_ir).
-
-    Valid for R in roughly [0.4, 1.0] → SpO2 ~[85, 100]%.
-    """
-    spo2 = 110.0 - 25.0 * r
-    return round(max(0.0, min(100.0, spo2)), 1)
 
 
 # ---------------------------------------------------------------------------

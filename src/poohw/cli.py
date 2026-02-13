@@ -59,11 +59,20 @@ def capture(address: str | None, duration: float | None, output: str | None) -> 
 @click.argument("file", type=click.Path(exists=True))
 @click.option("--output", "-o", default=None, help="Output decoded data as JSON.")
 @click.option("--verbose", "-v", is_flag=True, help="Show all packets including undecoded.")
-def replay(file: str, output: str | None, verbose: bool) -> None:
+@click.option("--analyze", is_flag=True, help="Pipe decoded packets through the analytics engine.")
+@click.option("--max-hr", default=190.0, help="Max HR for analytics (used with --analyze).")
+def replay(file: str, output: str | None, verbose: bool, analyze: bool, max_hr: float) -> None:
     """Replay and decode a captured packet log."""
     from poohw.replay import replay_file
 
-    replay_file(file, output, verbose)
+    records = replay_file(file, output, verbose)
+
+    if analyze:
+        from poohw.analytics.pipeline import run_pipeline
+
+        summary = run_pipeline(records, max_hr=max_hr)
+        click.echo(f"\n--- Analytics Summary ---")
+        click.echo(summary.to_json())
 
 
 @main.command()
@@ -208,6 +217,49 @@ def imu_cmd(state: str, address: str | None, historical: bool) -> None:
                     click.echo(f"  {r['formatted']}")
 
     asyncio.run(_imu())
+
+
+@main.command("analyze")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--output", "-o", default=None, help="Write summary JSON to file.")
+@click.option("--max-hr", default=190.0, help="Estimated max heart rate.")
+@click.option("--sleep-need", default=450.0, help="Sleep need in minutes (default 7.5h).")
+def analyze_cmd(file: str, output: str | None, max_hr: float, sleep_need: float) -> None:
+    """Run the full analytics pipeline on a captured packet log."""
+    from poohw.replay import replay_file
+    from poohw.analytics.pipeline import run_pipeline
+
+    # Replay the capture to get decoded records
+    records = replay_file(file, verbose=False)
+
+    summary = run_pipeline(
+        records,
+        max_hr=max_hr,
+        sleep_need_min=sleep_need,
+    )
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"  Daily Summary: {summary.date}")
+    click.echo(f"{'=' * 60}")
+    click.echo(f"  Sleep:      {summary.sleep_total_min:.0f} min "
+               f"(eff {summary.sleep_efficiency:.0%})")
+    click.echo(f"  Recovery:   {summary.recovery_score:.0f}/100")
+    click.echo(f"  HRV:        {summary.hrv_rmssd_ms:.1f} ms "
+               f"(score {summary.hrv_score:.1f})")
+    click.echo(f"  Resting HR: {summary.resting_hr:.0f} bpm")
+    click.echo(f"  Strain:     {summary.strain_score:.1f}/21")
+    click.echo(f"  SpO2:       {summary.spo2_median:.0f}% "
+               f"(min {summary.spo2_min:.0f}%)")
+    click.echo(f"  Resp rate:  {summary.respiratory_rate:.1f} breaths/min")
+    if summary.skin_temp_c is not None:
+        click.echo(f"  Skin temp:  {summary.skin_temp_c:.1f} °C")
+    click.echo(f"  Calories:   {summary.calories:.0f}")
+    click.echo(f"{'=' * 60}")
+
+    if output:
+        with open(output, "w") as f:
+            f.write(summary.to_json())
+        click.echo(f"\nSummary written to {output}")
 
 
 @main.command("data-range")
