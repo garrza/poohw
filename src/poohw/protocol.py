@@ -99,12 +99,25 @@ class PacketType(IntEnum):
     COMMAND_RESPONSE = 0x24
     REALTIME_DATA = 0x28
     REALTIME_RAW_DATA = 0x2B
-    HISTORICAL_DATA = 0x2F
-    EVENT = 0x30
+    HISTORICAL_DATA = 0x2F          # type 47 — bulk sensor records
+    EVENT = 0x30                     # type 48 — discrete events (haptics, alarms, etc.)
     METADATA = 0x31
     CONSOLE_LOGS = 0x32
     REALTIME_IMU_DATA = 0x33
-    HISTORICAL_IMU_DATA = 0x34
+    HISTORICAL_IMU_DATA = 0x34       # type 52 — historical accelerometer batches
+
+
+# ---------------------------------------------------------------------------
+# Historical data record subtypes
+# ---------------------------------------------------------------------------
+# Within HISTORICAL_DATA (0x2F) packets, the command byte specifies the record
+# subtype.  The 0x5C record is the most information-dense — it carries HR, RR
+# intervals, temperature, and likely SpO2 raw data in a single ~92-byte record.
+class HistoricalRecordType(IntEnum):
+    HR_RR = 0x2F             # Heart-rate + RR intervals (same value as packet type)
+    EVENT = 0x30             # Discrete events (haptics, alarms, body-detect changes)
+    ACCEL_BATCH = 0x34       # Accelerometer sample batch
+    COMPREHENSIVE = 0x5C     # Combined HR + temp + SpO2 raw + metadata record
 
 
 # ---------------------------------------------------------------------------
@@ -372,3 +385,70 @@ def format_packet(data: bytes | bytearray) -> str:
 def hex_to_bytes(hex_str: str) -> bytes:
     """Convert a hex string (with or without spaces) to bytes."""
     return bytes.fromhex(hex_str.replace(" ", ""))
+
+
+# ---------------------------------------------------------------------------
+# High-level command builders
+# ---------------------------------------------------------------------------
+# These wrap build_packet for the most commonly needed operations so callers
+# don't have to remember command IDs and payload formats.
+
+
+def build_toggle_realtime_hr(enable: bool = True, seq: int = 0) -> bytes:
+    """Build a TOGGLE_REALTIME_HR command packet."""
+    return build_packet(PacketType.COMMAND, Command.TOGGLE_REALTIME_HR,
+                        b"\x01" if enable else b"\x00", seq)
+
+
+def build_toggle_imu(enable: bool = True, seq: int = 0) -> bytes:
+    """Build a TOGGLE_IMU_MODE command to start/stop real-time accelerometer streaming."""
+    return build_packet(PacketType.COMMAND, Command.TOGGLE_IMU_MODE,
+                        b"\x01" if enable else b"\x00", seq)
+
+
+def build_toggle_imu_historical(enable: bool = True, seq: int = 0) -> bytes:
+    """Build a TOGGLE_IMU_MODE_HISTORICAL command for historical accel batches."""
+    return build_packet(PacketType.COMMAND, Command.TOGGLE_IMU_MODE_HISTORICAL,
+                        b"\x01" if enable else b"\x00", seq)
+
+
+def build_get_data_range(seq: int = 0) -> bytes:
+    """Build a GET_DATA_RANGE command — asks the strap what data it has buffered."""
+    return build_packet(PacketType.COMMAND, Command.GET_DATA_RANGE, b"", seq)
+
+
+def build_set_read_pointer(offset: int, seq: int = 0) -> bytes:
+    """Build a SET_READ_POINTER command — positions the read cursor.
+
+    Args:
+        offset: 32-bit read pointer offset (little-endian in the packet).
+    """
+    return build_packet(PacketType.COMMAND, Command.SET_READ_POINTER,
+                        struct.pack("<I", offset), seq)
+
+
+def build_send_historical_data(seq: int = 0) -> bytes:
+    """Build a SEND_HISTORICAL_DATA command — triggers the strap to start
+    transmitting buffered historical records."""
+    return build_packet(PacketType.COMMAND, Command.SEND_HISTORICAL_DATA, b"", seq)
+
+
+def build_abort_historical(seq: int = 0) -> bytes:
+    """Build an ABORT_HISTORICAL_TRANSMITS command."""
+    return build_packet(PacketType.COMMAND, Command.ABORT_HISTORICAL_TRANSMITS, b"", seq)
+
+
+def build_get_battery(seq: int = 0) -> bytes:
+    """Build a GET_BATTERY_LEVEL command."""
+    return build_packet(PacketType.COMMAND, Command.GET_BATTERY_LEVEL, b"", seq)
+
+
+def build_get_hello(seq: int = 0) -> bytes:
+    """Build a GET_HELLO handshake command."""
+    return build_packet(PacketType.COMMAND, Command.GET_HELLO, b"", seq)
+
+
+def build_set_clock(epoch_secs: int, seq: int = 0) -> bytes:
+    """Build a SET_CLOCK command with a Unix timestamp (uint32 LE)."""
+    return build_packet(PacketType.COMMAND, Command.SET_CLOCK,
+                        struct.pack("<I", epoch_secs), seq)

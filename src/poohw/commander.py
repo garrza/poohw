@@ -11,6 +11,15 @@ from poohw.protocol import (
     Command,
     PacketType,
     build_packet,
+    build_toggle_realtime_hr,
+    build_toggle_imu,
+    build_toggle_imu_historical,
+    build_get_data_range,
+    build_set_read_pointer,
+    build_send_historical_data,
+    build_abort_historical,
+    build_get_battery,
+    build_get_hello,
     char_role,
     format_packet,
     hex_to_bytes,
@@ -272,9 +281,25 @@ async def interactive_repl(address: str | None = None) -> None:
         print("    battery            — get battery level")
         print("    hello              — send GET_HELLO")
         print("    hr on/off          — toggle realtime HR")
+        print("    imu on/off         — toggle realtime accelerometer (IMU)")
+        print("    imu-hist on/off    — toggle historical IMU batches")
+        print("    data-range         — query buffered data range")
+        print("    history            — request historical data download")
+        print("    history-abort      — abort historical data transmit")
         print("    services           — list all services")
         print("  Or type raw hex to send directly.")
         print("  'q' = quit\n")
+
+        # Shortcuts that use pre-built command packets (not just cmd+data pairs)
+        prebuilt_shortcuts: dict[str, bytes] = {
+            "imu on": build_toggle_imu(True),
+            "imu off": build_toggle_imu(False),
+            "imu-hist on": build_toggle_imu_historical(True),
+            "imu-hist off": build_toggle_imu_historical(False),
+            "data-range": build_get_data_range(),
+            "history": build_send_historical_data(),
+            "history-abort": build_abort_historical(),
+        }
 
         shortcuts = {
             "vibrate": (Command.RUN_HAPTICS_PATTERN, b"\x00"),
@@ -303,6 +328,13 @@ async def interactive_repl(address: str | None = None) -> None:
 
             if user_input.lower() == "services":
                 _dump_services(client)
+                continue
+
+            if user_input.lower() in prebuilt_shortcuts:
+                pkt = prebuilt_shortcuts[user_input.lower()]
+                print(f"  -> {user_input}: {pkt.hex()}")
+                await client.write_gatt_char(write_uuid, pkt)
+                await asyncio.sleep(3)
                 continue
 
             if user_input.lower() in shortcuts:

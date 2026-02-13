@@ -12,10 +12,15 @@ from poohw.decoders.hr import HeartRateDecoder
 from poohw.decoders.accel import AccelDecoder
 from poohw.decoders.temperature import TemperatureDecoder
 from poohw.decoders.spo2 import SpO2Decoder
+from poohw.decoders.historical import HistoricalDecoder
 from poohw.protocol import is_proprietary_uuid
 
 
+# Ordered list of decoders — historical first since it's the most specific
+# for HISTORICAL_DATA packets and avoids false positives from the heuristic
+# decoders (hr/temp/spo2) that guess at byte layouts.
 DECODERS = [
+    ("historical", HistoricalDecoder),
     ("heart_rate", HeartRateDecoder),
     ("accelerometer", AccelDecoder),
     ("temperature", TemperatureDecoder),

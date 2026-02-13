@@ -137,5 +137,112 @@ def stop_haptics_cmd(address: str | None, all_devices: bool) -> None:
     asyncio.run(stop_haptics(address, all_devices))
 
 
+@main.command("history")
+@click.option("--address", "-a", default=None, help="BLE address to connect to.")
+@click.option("--timeout", "-t", default=30.0, help="Response wait timeout in seconds.")
+def history_cmd(address: str | None, timeout: float) -> None:
+    """Request historical data download from the Whoop."""
+    from poohw.commander import send_built_command
+    from poohw.protocol import Command
+    from poohw.scanner import find_whoop
+    from bleak import BleakClient
+
+    async def _history() -> None:
+        addr = address
+        if addr is None:
+            device = await find_whoop()
+            if device is None:
+                click.echo("No Whoop found.")
+                return
+            addr = device.address
+
+        click.echo(f"Connecting to {addr}...")
+        async with BleakClient(addr) as client:
+            click.echo("Requesting historical data...")
+            responses = await send_built_command(
+                client, Command.SEND_HISTORICAL_DATA, b"", timeout
+            )
+            if not responses:
+                click.echo("No responses received.")
+            else:
+                click.echo(f"\n{len(responses)} response(s) received.")
+                for r in responses:
+                    click.echo(f"  [{r['timestamp']}] {r['formatted']}")
+
+    asyncio.run(_history())
+
+
+@main.command("imu")
+@click.argument("state", type=click.Choice(["on", "off"]))
+@click.option("--address", "-a", default=None, help="BLE address to connect to.")
+@click.option("--historical", "-H", is_flag=True, help="Toggle historical IMU mode instead of realtime.")
+def imu_cmd(state: str, address: str | None, historical: bool) -> None:
+    """Toggle accelerometer (IMU) streaming on/off."""
+    from poohw.commander import send_built_command
+    from poohw.protocol import Command
+    from poohw.scanner import find_whoop
+    from bleak import BleakClient
+
+    enable = state == "on"
+    cmd = Command.TOGGLE_IMU_MODE_HISTORICAL if historical else Command.TOGGLE_IMU_MODE
+    label = "historical IMU" if historical else "realtime IMU"
+
+    async def _imu() -> None:
+        addr = address
+        if addr is None:
+            device = await find_whoop()
+            if device is None:
+                click.echo("No Whoop found.")
+                return
+            addr = device.address
+
+        click.echo(f"Connecting to {addr}...")
+        async with BleakClient(addr) as client:
+            click.echo(f"Toggling {label} {'ON' if enable else 'OFF'}...")
+            responses = await send_built_command(
+                client, cmd, b"\x01" if enable else b"\x00", 5.0
+            )
+            if responses:
+                click.echo(f"{len(responses)} response(s):")
+                for r in responses:
+                    click.echo(f"  {r['formatted']}")
+
+    asyncio.run(_imu())
+
+
+@main.command("data-range")
+@click.option("--address", "-a", default=None, help="BLE address to connect to.")
+def data_range_cmd(address: str | None) -> None:
+    """Query what historical data range is buffered on the Whoop."""
+    from poohw.commander import send_built_command
+    from poohw.protocol import Command
+    from poohw.scanner import find_whoop
+    from bleak import BleakClient
+
+    async def _data_range() -> None:
+        addr = address
+        if addr is None:
+            device = await find_whoop()
+            if device is None:
+                click.echo("No Whoop found.")
+                return
+            addr = device.address
+
+        click.echo(f"Connecting to {addr}...")
+        async with BleakClient(addr) as client:
+            click.echo("Querying data range...")
+            responses = await send_built_command(
+                client, Command.GET_DATA_RANGE, b"", 5.0
+            )
+            if not responses:
+                click.echo("No response.")
+            else:
+                for r in responses:
+                    click.echo(f"  {r['formatted']}")
+                    click.echo(f"  raw: {r['hex']}")
+
+    asyncio.run(_data_range())
+
+
 if __name__ == "__main__":
     main()
