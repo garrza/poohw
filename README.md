@@ -39,6 +39,7 @@ poohw send aa0800a8230e16001147c585
 ### BLE Services
 
 The Whoop 4.0 exposes:
+
 - **Standard Heart Rate Service** (0x180D) with Heart Rate Measurement (0x2A37)
 - **Proprietary service** with custom characteristics:
   - `CMD_TO_STRAP`: `61080002-8d6d-82b8-614a-1c8cb0f8dcc6` (write)
