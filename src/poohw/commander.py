@@ -50,6 +50,29 @@ def _find_write_char(client: BleakClient) -> str | None:
     return None
 
 
+async def request_historical_data(client: BleakClient) -> bool:
+    """Run the full historical data workflow so the band streams 0x5C/accel packets.
+
+    Protocol order (per docs): GET_DATA_RANGE → SET_READ_POINTER → SEND_HISTORICAL_DATA.
+    Without the first two steps many bands never start streaming.
+    """
+    write_uuid = _find_write_char(client)
+    if write_uuid is None:
+        return False
+
+    # 1) Query what range the strap has buffered
+    await client.write_gatt_char(write_uuid, build_get_data_range())
+    await asyncio.sleep(1.2)
+
+    # 2) Position read cursor at start (0 = beginning; band may use range from step 1 internally)
+    await client.write_gatt_char(write_uuid, build_set_read_pointer(0))
+    await asyncio.sleep(0.3)
+
+    # 3) Start streaming historical records (HISTORICAL_DATA on DATA_FROM_STRAP)
+    await client.write_gatt_char(write_uuid, build_send_historical_data())
+    return True
+
+
 def _find_notify_chars(client: BleakClient) -> list[tuple[str, str]]:
     """Find all notify-capable characteristics on the proprietary service.
 

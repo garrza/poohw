@@ -123,7 +123,7 @@ def replay_file(
                 for r in results:
                     record["decoded"].append({
                         "type": r["type"],
-                        "data": str(r["data"]),
+                        "data": r["data"],  # keep actual object for analytics pipeline
                     })
                     print(f"  [{timestamp}] {r['type']}: {r['data']}")
             elif verbose:
@@ -135,8 +135,16 @@ def replay_file(
           f"{decoded_count} decoded")
 
     if output_path:
+        # JSON-serializable copy (dataclass instances → str)
+        def serializable_record(rec: dict) -> dict:
+            out = {k: v for k, v in rec.items() if k != "decoded"}
+            out["decoded"] = [
+                {"type": d["type"], "data": str(d["data"])}
+                for d in rec.get("decoded", [])
+            ]
+            return out
         with open(output_path, "w") as out:
-            json.dump(records, out, indent=2)
+            json.dump([serializable_record(rec) for rec in records], out, indent=2)
         print(f"Output written to {output_path}")
 
     return records

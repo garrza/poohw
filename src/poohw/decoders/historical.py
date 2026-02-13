@@ -47,10 +47,11 @@ from poohw.analytics.features import (  # noqa: F401
 from poohw.analytics.spo2 import estimate_spo2_from_ratio  # noqa: F401
 
 
-# Packet types that carry historical data
+# Packet types that we can decode (historical data + event notifications)
 HISTORICAL_PACKET_TYPES = {
     PacketType.HISTORICAL_DATA,
     PacketType.HISTORICAL_IMU_DATA,
+    PacketType.EVENT,  # 0x30 — event notifications from EVENTS_FROM_STRAP
 }
 
 
@@ -186,6 +187,10 @@ class HistoricalDecoder:
         # Historical IMU data gets its own packet type
         if packet.packet_type == PacketType.HISTORICAL_IMU_DATA:
             return HistoricalDecoder._decode_accel_batch(payload)
+
+        # EVENT (0x30) packets from EVENTS_FROM_STRAP — payload is one event record
+        if packet.packet_type == PacketType.EVENT:
+            return HistoricalDecoder._decode_event(payload)
 
         # Dispatch by command byte (record subtype)
         if cmd == HistoricalRecordType.COMPREHENSIVE:

@@ -19,6 +19,7 @@ async def capture(
     address: str | None = None,
     duration: float | None = None,
     output: str | None = None,
+    request_history: bool = False,
 ) -> None:
     """Subscribe to all notify characteristics and log raw packets.
 
@@ -26,6 +27,8 @@ async def capture(
         address: BLE address. If None, scans for a Whoop.
         duration: Capture duration in seconds. None = run until Ctrl+C.
         output: Output file path. If None, auto-generates in logs/.
+        request_history: If True, send SEND_HISTORICAL_DATA after subscribing
+            so the band pushes historical (0x5C, accel, etc.) packets.
     """
     if address is None:
         device = await find_whoop()
@@ -86,6 +89,16 @@ async def capture(
             print("No notify characteristics found.")
             f.close()
             return
+
+        if request_history:
+            from poohw.commander import request_historical_data
+            print("Requesting historical data (GET_DATA_RANGE → SET_READ_POINTER → SEND_HISTORICAL_DATA)...")
+            if await request_historical_data(client):
+                print("  Full workflow sent. Keep capturing 30–90s for 0x5C/accel packets on DATA_FROM_STRAP.")
+            else:
+                print("  Could not find write characteristic; skipping request.")
+            # Brief pause so the first burst doesn't get lost
+            await asyncio.sleep(0.5)
 
         print(f"\nCapturing from {len(notify_chars)} characteristics → {outpath}")
         print("Press Ctrl+C to stop.\n")

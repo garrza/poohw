@@ -45,12 +45,13 @@ def stream(address: str | None) -> None:
 @click.option("--address", "-a", default=None, help="BLE address to connect to.")
 @click.option("--duration", "-d", default=None, type=float, help="Capture duration in seconds.")
 @click.option("--output", "-o", default=None, help="Output file path.")
-def capture(address: str | None, duration: float | None, output: str | None) -> None:
+@click.option("--history", "-H", is_flag=True, help="Request historical data so band streams 0x5C/accel packets.")
+def capture(address: str | None, duration: float | None, output: str | None, history: bool) -> None:
     """Capture raw BLE packets from a Whoop to a file."""
     from poohw.logger import capture as do_capture
 
     try:
-        asyncio.run(do_capture(address, duration, output))
+        asyncio.run(do_capture(address, duration, output, request_history=history))
     except KeyboardInterrupt:
         click.echo("\nStopped.")
 
@@ -255,6 +256,18 @@ def analyze_cmd(file: str, output: str | None, max_hr: float, sleep_need: float)
         click.echo(f"  Skin temp:  {summary.skin_temp_c:.1f} °C")
     click.echo(f"  Calories:   {summary.calories:.0f}")
     click.echo(f"{'=' * 60}")
+
+    # Hint when no HR/historical data was in the capture
+    if (
+        summary.recovery_score == 0
+        and summary.hrv_rmssd_ms == 0
+        and summary.strain_score == 0
+        and summary.sleep_total_min == 0
+    ):
+        click.echo(
+            "\n  No HR/historical data in this capture. For full analytics, capture with:\n"
+            "    poohw capture -o out.jsonl -d 90 --history"
+        )
 
     if output:
         with open(output, "w") as f:
