@@ -10,7 +10,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Requires macOS Bluetooth permissions — grant access to your terminal in System Settings > Privacy & Security > Bluetooth.
+Requires Bluetooth permissions — grant access to your terminal in System Settings > Privacy & Security > Bluetooth.
 
 ## Usage
 
